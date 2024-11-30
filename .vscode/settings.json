@@ -16,6 +16,6 @@
     "files.associations": {
         "format": "c"
     },
-    "idf.portWin": "COM5",
+    "idf.portWin": "COM6",
     "idf.flashType": "UART"
 }

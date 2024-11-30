@@ -7,29 +7,26 @@
 #include "driver/gpio.h"
 #include "esp_log.h"
 #include "esp_timer.h"
+#include "driver/gpio_filter.h"
 
 #define APP_TAG "driver"
 
 //GPIO config
-#define TRIAC_OUTPUT 8
+#define TRIAC_OUTPUT 7
 #define ZERO_ZROSS 40
 
 
 static void IRAM_ATTR zero_cross_int(void* arg)
 {
-    static uint64_t prev_time = 0;
+    static uint8_t status;
 
-    if ((esp_timer_get_time() - prev_time) > 8000)
-    {
-        (*((int*) arg))++;
-    }
-
-    prev_time = esp_timer_get_time();
+    status ^= 1;
+    gpio_set_level(TRIAC_OUTPUT, status);
 }
 
 void config_gpio(int *counter)
 {
-    gpio_install_isr_service(2);
+    gpio_install_isr_service(0);
 
     gpio_config_t output_conf = {
         .intr_type = GPIO_INTR_DISABLE,
@@ -42,9 +39,9 @@ void config_gpio(int *counter)
 
     gpio_config_t input_conf = {
         .intr_type = GPIO_INTR_POSEDGE,
-        .pin_bit_mask = 1ULL << ZERO_ZROSS,
+        .pin_bit_mask = (1ULL<<ZERO_ZROSS),
         .mode = GPIO_MODE_INPUT,
-        .pull_down_en = 1,
+        .pull_down_en = 0,
         .pull_up_en = 0
     };
     gpio_config(&input_conf);
