@@ -19,9 +19,15 @@
 static void IRAM_ATTR zero_cross_int(void* arg)
 {
     static uint8_t status;
+    static uint64_t prev_time;
 
-    status ^= 1;
-    gpio_set_level(TRIAC_OUTPUT, status);
+    if (esp_timer_get_time() - prev_time > 500)
+    {
+        status ^= 1;
+        gpio_set_level(TRIAC_OUTPUT, status);
+    }
+
+    prev_time = esp_timer_get_time();
 }
 
 void config_gpio(int *counter)
@@ -42,7 +48,7 @@ void config_gpio(int *counter)
         .pin_bit_mask = (1ULL<<ZERO_ZROSS),
         .mode = GPIO_MODE_INPUT,
         .pull_down_en = 0,
-        .pull_up_en = 0
+        .pull_up_en = 1
     };
     gpio_config(&input_conf);
 
