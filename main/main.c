@@ -7,7 +7,7 @@
 #include "driver/gpio.h"
 #include "esp_log.h"
 #include "esp_timer.h"
-#include "driver/gpio_filter.h"
+#include "driver/gptimer.h"
 
 #define APP_TAG "driver"
 
@@ -15,22 +15,37 @@
 #define TRIAC_OUTPUT 7
 #define ZERO_ZROSS 40
 
+uint64_t time_value = 9000;
+
+gptimer_handle_t triac_timer = NULL;
+TaskHandle_t triac_task_handle = NULL;
 
 static void IRAM_ATTR zero_cross_int(void* arg)
 {
-    static uint8_t status;
     static uint64_t prev_time;
 
     if (esp_timer_get_time() - prev_time > 500)
     {
-        status ^= 1;
-        gpio_set_level(TRIAC_OUTPUT, status);
+        ESP_ERROR_CHECK(gptimer_set_raw_count(triac_timer, 0));
+        ESP_ERROR_CHECK(gptimer_start(triac_timer));
     }
 
     prev_time = esp_timer_get_time();
 }
 
-void config_gpio(int *counter)
+static bool IRAM_ATTR triac_alarm(gptimer_handle_t timer, const gptimer_alarm_event_data_t *edata, void *user_data)
+{
+    BaseType_t high_task_awoken = pdFALSE;
+    gptimer_stop(timer);
+
+    BaseType_t xHigherPriorityTaskWoken = pdFALSE;
+    vTaskNotifyGiveFromISR(triac_task_handle, &xHigherPriorityTaskWoken);
+    portYIELD_FROM_ISR(xHigherPriorityTaskWoken);
+
+    return (high_task_awoken == pdTRUE);
+}
+
+void config_gpio()
 {
     gpio_install_isr_service(0);
 
@@ -52,21 +67,71 @@ void config_gpio(int *counter)
     };
     gpio_config(&input_conf);
 
-    gpio_isr_handler_add(ZERO_ZROSS, zero_cross_int, (void*) counter);
+    gpio_isr_handler_add(ZERO_ZROSS, zero_cross_int, NULL);
+}
+
+void config_timer()
+{
+    gptimer_config_t timer_config = {
+        .clk_src = GPTIMER_CLK_SRC_DEFAULT,
+        .direction = GPTIMER_COUNT_UP,
+        .resolution_hz = 1000000, // 1MHz, 1 tick=1us
+    };
+    ESP_ERROR_CHECK(gptimer_new_timer(&timer_config, &triac_timer));
+
+    gptimer_event_callbacks_t alarm = {
+        .on_alarm = triac_alarm,
+    };
+    ESP_ERROR_CHECK(gptimer_register_event_callbacks(triac_timer, &alarm, NULL));
+
+    gptimer_alarm_config_t alarm_config = {
+        .alarm_count = time_value,
+    };
+    ESP_ERROR_CHECK(gptimer_set_alarm_action(triac_timer, &alarm_config));
+
+    ESP_ERROR_CHECK(gptimer_enable(triac_timer));
+}
+
+void triac_task(void *arg)
+{
+    uint32_t natified_value;
+    uint64_t time = 0;
+
+    ESP_LOGI(APP_TAG, "task initiated");
+
+    while(true)
+    {
+        natified_value = ulTaskNotifyTake(pdTRUE, portMAX_DELAY); 
+        
+        if (natified_value > 0)
+        {
+            gpio_set_level(TRIAC_OUTPUT, true);
+
+            time = esp_timer_get_time();
+            while (esp_timer_get_time() - time < 30);
+
+            gpio_set_level(TRIAC_OUTPUT, false);
+        }    
+        else
+        {
+            ESP_LOGI(APP_TAG, "notified value 0");
+        }                  
+    }
+
+    ESP_LOGE(APP_TAG, "task is deleted");
+    vTaskDelete(NULL);
 }
 
 void app_main(void)
 {
-    int int_counter = 0;
+    xTaskCreatePinnedToCore(triac_task, "set_triac", 8192, NULL, 10, &triac_task_handle, tskNO_AFFINITY);
 
-    config_gpio(&int_counter);
-    gpio_dump_io_configuration(stdout, 1ULL << ZERO_ZROSS);
+    config_timer();
+    config_gpio();
 
-    printf("Minimum free heap size: %"PRIu32" bytes\n", esp_get_minimum_free_heap_size());
-
-    while(true)
+    /*while(true)
     {
-        ESP_LOGI(APP_TAG, "counter %d, %lld", int_counter, esp_timer_get_time());
+        ESP_LOGI(APP_TAG, "counter %d", test);
         vTaskDelay(100 / portTICK_PERIOD_MS);
-    }
+    }*/
 }
