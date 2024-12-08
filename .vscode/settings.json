@@ -16,7 +16,7 @@
     "files.associations": {
         "format": "c"
     },
-    "idf.portWin": "COM5",
+    "idf.portWin": "COM10",
     "idf.flashType": "UART",
     "idf.gitPathWin": "C:\\Espressif\\tools\\idf-git\\2.39.2\\cmd\\git.exe"
 }
