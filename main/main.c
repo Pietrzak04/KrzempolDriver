@@ -22,25 +22,29 @@ TaskHandle_t triac_task_handle = NULL;
 
 static void IRAM_ATTR zero_cross_int(void* arg)
 {
-    static uint64_t prev_time;
+    static uint64_t time;
 
-    if (esp_timer_get_time() - prev_time > 500)
+    if (esp_timer_get_time() - time > 500)
     {
         ESP_ERROR_CHECK(gptimer_set_raw_count(triac_timer, 0));
         ESP_ERROR_CHECK(gptimer_start(triac_timer));
     }
 
-    prev_time = esp_timer_get_time();
+    time = esp_timer_get_time();
 }
 
 static bool IRAM_ATTR triac_alarm(gptimer_handle_t timer, const gptimer_alarm_event_data_t *edata, void *user_data)
 {
     BaseType_t high_task_awoken = pdFALSE;
+    uint64_t time = 0;
     gptimer_stop(timer);
 
-    BaseType_t xHigherPriorityTaskWoken = pdFALSE;
-    vTaskNotifyGiveFromISR(triac_task_handle, &xHigherPriorityTaskWoken);
-    portYIELD_FROM_ISR(xHigherPriorityTaskWoken);
+    gpio_set_level(TRIAC_OUTPUT, true);
+    
+    time = esp_timer_get_time();
+    while (esp_timer_get_time() - time < 30);
+
+    gpio_set_level(TRIAC_OUTPUT, false);
 
     return (high_task_awoken == pdTRUE);
 }
@@ -92,46 +96,8 @@ void config_timer()
     ESP_ERROR_CHECK(gptimer_enable(triac_timer));
 }
 
-void triac_task(void *arg)
-{
-    uint32_t natified_value;
-    uint64_t time = 0;
-
-    ESP_LOGI(APP_TAG, "task initiated");
-
-    while(true)
-    {
-        natified_value = ulTaskNotifyTake(pdTRUE, portMAX_DELAY); 
-        
-        if (natified_value > 0)
-        {
-            gpio_set_level(TRIAC_OUTPUT, true);
-
-            time = esp_timer_get_time();
-            while (esp_timer_get_time() - time < 30);
-
-            gpio_set_level(TRIAC_OUTPUT, false);
-        }    
-        else
-        {
-            ESP_LOGI(APP_TAG, "notified value 0");
-        }                  
-    }
-
-    ESP_LOGE(APP_TAG, "task is deleted");
-    vTaskDelete(NULL);
-}
-
 void app_main(void)
 {
-    xTaskCreatePinnedToCore(triac_task, "set_triac", 8192, NULL, 10, &triac_task_handle, tskNO_AFFINITY);
-
     config_timer();
     config_gpio();
-
-    /*while(true)
-    {
-        ESP_LOGI(APP_TAG, "counter %d", test);
-        vTaskDelay(100 / portTICK_PERIOD_MS);
-    }*/
 }
