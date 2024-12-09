@@ -18,16 +18,25 @@
 #define ENCODER_GPIO_A 35
 #define ENCODER_GPIO_B 36
 
-#define TIME_MIN_LIMIT -5000
-#define TIME_MAX_LIMIT 5000
+#define TIME_MIN_LIMIT -500
+#define TIME_MAX_LIMIT 500
 
-#define TRIAC_ACTIVATION_TIME 30
-
-uint64_t time_value = 9000;
+#define TRIAC_ACTIVATION_TIME 20
 
 //hardware handles
 gptimer_handle_t triac_timer = NULL;
 pcnt_unit_handle_t pcnt_unit = NULL;
+
+static inline void triac_on_off()
+{
+    uint64_t time = 0;
+    gpio_set_level(TRIAC_OUTPUT, true);
+
+    time = esp_timer_get_time();
+    while (esp_timer_get_time() - time < TRIAC_ACTIVATION_TIME);
+
+    gpio_set_level(TRIAC_OUTPUT, false);
+}
 
 static void IRAM_ATTR zero_cross_int(void* arg)
 {
@@ -35,12 +44,23 @@ static void IRAM_ATTR zero_cross_int(void* arg)
     int time_count;
     pcnt_unit_get_count(pcnt_unit, &time_count);
 
-    if (esp_timer_get_time() - time > 500)
+    if (esp_timer_get_time() - time > 1000)
     {
+        /*if (time_count * 10 < -4700) 
+        {
+            triac_on_off();
+            return;
+        }*/
+    
+        if (time_count * 10 > 4800) 
+        {
+            return;
+        }
+
         ESP_ERROR_CHECK(gptimer_set_raw_count(triac_timer, 0));
 
         gptimer_alarm_config_t alarm_config = {
-            .alarm_count = 5000 + time_count,
+            .alarm_count = 5000 + (time_count * 10),
         };
         gptimer_set_alarm_action(triac_timer, &alarm_config);
 
@@ -53,20 +73,14 @@ static void IRAM_ATTR zero_cross_int(void* arg)
 static bool IRAM_ATTR triac_alarm(gptimer_handle_t timer, const gptimer_alarm_event_data_t *edata, void *user_data)
 {
     BaseType_t high_task_awoken = pdFALSE;
-    uint64_t time = 0;
     gptimer_stop(timer);
 
-    gpio_set_level(TRIAC_OUTPUT, true);
-
-    time = esp_timer_get_time();
-    while (esp_timer_get_time() - time < TRIAC_ACTIVATION_TIME);
-
-    gpio_set_level(TRIAC_OUTPUT, false);
+    triac_on_off();
 
     return (high_task_awoken == pdTRUE);
 }
 
-void config_gpio()
+static void config_gpio()
 {
     gpio_install_isr_service(0);
 
@@ -91,7 +105,7 @@ void config_gpio()
     gpio_isr_handler_add(ZERO_ZROSS, zero_cross_int, NULL);
 }
 
-void config_timer()
+static void config_timer()
 {
     gptimer_config_t timer_config = {
         .clk_src = GPTIMER_CLK_SRC_DEFAULT,
@@ -105,15 +119,10 @@ void config_timer()
     };
     ESP_ERROR_CHECK(gptimer_register_event_callbacks(triac_timer, &alarm, NULL));
 
-    gptimer_alarm_config_t alarm_config = {
-        .alarm_count = time_value,
-    };
-    ESP_ERROR_CHECK(gptimer_set_alarm_action(triac_timer, &alarm_config));
-
     ESP_ERROR_CHECK(gptimer_enable(triac_timer));
 }
 
-void config_encoder()
+static void config_encoder()
 {
     pcnt_unit_config_t unit_config = {
         .high_limit = TIME_MAX_LIMIT,
@@ -163,7 +172,7 @@ void app_main(void)
     {
         int time_count;
         pcnt_unit_get_count(pcnt_unit, &time_count);
-        ESP_LOGI(APP_TAG, "wartosc %d", time_count);
+        ESP_LOGI(APP_TAG, "wartosc %d", time_count * 10);
         vTaskDelay(100 / portTICK_PERIOD_MS);
     }
 }
