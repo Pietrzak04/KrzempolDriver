@@ -1,6 +1,7 @@
 #include <stdio.h>
 #include <inttypes.h>
 #include <stdint.h>
+#include <math.h>
 
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
@@ -18,14 +19,17 @@
 #define ENCODER_GPIO_A 35
 #define ENCODER_GPIO_B 36
 
-#define TIME_MIN_LIMIT -500
-#define TIME_MAX_LIMIT 500
+#define TIME_MIN_LIMIT -1 // -1 is automaticly changed to 0
+#define TIME_MAX_LIMIT 400 // 401 is automaticly changed to 0
 
 #define TRIAC_ACTIVATION_TIME 20
+#define MAX_WAIT_TIME 10000
 
 //hardware handles
 gptimer_handle_t triac_timer = NULL;
 pcnt_unit_handle_t pcnt_unit = NULL;
+
+uint64_t wait_time = MAX_WAIT_TIME;
 
 static inline void triac_on_off()
 {
@@ -41,26 +45,18 @@ static inline void triac_on_off()
 static void IRAM_ATTR zero_cross_int(void* arg)
 {
     static uint64_t time;
-    int time_count;
-    pcnt_unit_get_count(pcnt_unit, &time_count);
-
     if (esp_timer_get_time() - time > 1000)
     {
-        /*if (time_count * 10 < -4700) 
+        if (wait_time > 9800 || wait_time < 200)
         {
-            triac_on_off();
+            time = esp_timer_get_time();
             return;
-        }*/
-    
-        if (time_count * 10 > 4800) 
-        {
-            return;
-        }
+        } 
 
         ESP_ERROR_CHECK(gptimer_set_raw_count(triac_timer, 0));
 
         gptimer_alarm_config_t alarm_config = {
-            .alarm_count = 5000 + (time_count * 10),
+            .alarm_count = MAX_WAIT_TIME - wait_time,
         };
         gptimer_set_alarm_action(triac_timer, &alarm_config);
 
@@ -127,12 +123,13 @@ static void config_encoder()
     pcnt_unit_config_t unit_config = {
         .high_limit = TIME_MAX_LIMIT,
         .low_limit = TIME_MIN_LIMIT,
+        .flags.accum_count = 0,
     };
     
     ESP_ERROR_CHECK(pcnt_new_unit(&unit_config, &pcnt_unit));
 
     pcnt_glitch_filter_config_t filter_config = {
-        .max_glitch_ns = 1000,
+        .max_glitch_ns = 5000,
     };
     ESP_ERROR_CHECK(pcnt_unit_set_glitch_filter(pcnt_unit, &filter_config));
 
@@ -168,11 +165,22 @@ void app_main(void)
     config_gpio();
     config_encoder();
 
-    while (true)
+    int read = 0;
+    int prev_read = 0;
+    float power_percentage = 0;
+    while(true)
     {
-        int time_count;
-        pcnt_unit_get_count(pcnt_unit, &time_count);
-        ESP_LOGI(APP_TAG, "wartosc %d", time_count * 10);
-        vTaskDelay(100 / portTICK_PERIOD_MS);
+        while(read == prev_read)
+        {
+            pcnt_unit_get_count(pcnt_unit, &read);
+            vTaskDelay(100 / portTICK_PERIOD_MS);
+        }
+        prev_read = read;
+
+        power_percentage = (read >> 2) / 100.0f;
+
+        wait_time = (asin(sqrt(power_percentage)) * 2 * MAX_WAIT_TIME) / M_PI;
+
+        ESP_LOGI(APP_TAG, "wartosc %.2f", power_percentage);
     }
 }
