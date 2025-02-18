@@ -4,6 +4,12 @@
 	(generator_version "8.0")
 	(uuid "28f41260-cbfe-43f7-9f98-338c172cf26e")
 	(paper "A4")
+	(title_block
+		(title "Krzempol furnace")
+		(date "2025-02-18")
+		(rev "1.0")
+		(company "MOS")
+	)
 	(lib_symbols
 		(symbol "Connector:Screw_Terminal_01x02"
 			(pin_names
